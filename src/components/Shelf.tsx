@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { AddDialog, SettingsDialog } from "./Dialogs";
+import { Home } from "./Home";
 import { ProjectDetail } from "./ProjectDetail";
-import { ProjectList } from "./ProjectList";
 import { useShelf } from "@/lib/store";
 
 export function Shelf({ selectedId }: { selectedId?: string }) {
@@ -13,23 +13,18 @@ export function Shelf({ selectedId }: { selectedId?: string }) {
   const selected = projects.find((project) => project.id === selectedId);
 
   return (
-    <div className="app">
-      <div className={selectedId ? "desktop-only" : undefined}>
-        <ProjectList activeId={selectedId} onAdd={() => setAddOpen(true)} onSettings={() => setSettingsOpen(true)} />
-      </div>
+    <div className={selected ? "detail-wrap" : undefined}>
       {selected ? (
         <ProjectDetail key={selected.id} project={selected} />
-      ) : (
-        <main className={selectedId ? "main" : "main desktop-only"}>
+      ) : selectedId ? (
+        <main className="home">
           <div className="empty">
-            <h2>{selectedId ? "Bu proje yok" : "Bir satır seç"}</h2>
-            <p>
-              {selectedId
-                ? "Silinmiş ya da hiç eklenmemiş."
-                : "Sıra, bugün dokunman gereken işe göre. Sürükle ya da oklarla değiştir."}
-            </p>
+            <h2>Bu proje yok</h2>
+            <p>Silinmiş ya da hiç eklenmemiş.</p>
           </div>
         </main>
+      ) : (
+        <Home onAdd={() => setAddOpen(true)} onSettings={() => setSettingsOpen(true)} />
       )}
       {addOpen ? <AddDialog onClose={() => setAddOpen(false)} /> : null}
       {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}

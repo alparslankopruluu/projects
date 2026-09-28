@@ -6,6 +6,7 @@ import { useState } from "react";
 import { splitBrief } from "@/lib/brief";
 import { useShelf } from "@/lib/store";
 import { ATTENTION_LABEL, type Note, type Project } from "@/lib/types";
+import { CheckLine, Meter } from "./Checks";
 
 function BriefView({ markdown }: { markdown: string }) {
   const parts = splitBrief(markdown);
@@ -80,8 +81,15 @@ export function ProjectDetail({ project }: { project: Project }) {
     }
   }
 
+  function toggle(checkId: string) {
+    updateProject(project.id, {
+      checks: project.checks.map((item) => (item.id === checkId ? { ...item, done: !item.done } : item)),
+    });
+  }
+
   return (
     <main className="main">
+      {syncing ? <div className="loadbar" aria-hidden="true" /> : null}
       <div className="detail-top">
         <Link className="back" href="/">
           Bugün
@@ -108,6 +116,15 @@ export function ProjectDetail({ project }: { project: Project }) {
           onChange={(event) => updateProject(project.id, { reason: event.target.value })}
         />
         <div className="stack">
+          <section className="card">
+            <h3 className="card-label">Adımlar</h3>
+            <div className="step-pad">
+              <Meter checks={project.checks} />
+              {project.checks.map((item) => (
+                <CheckLine key={item.id} item={item} onToggle={() => toggle(item.id)} />
+              ))}
+            </div>
+          </section>
           <section className="card">
             <h3 className="card-label">Durum</h3>
             {project.platforms.map((platform, index) => (

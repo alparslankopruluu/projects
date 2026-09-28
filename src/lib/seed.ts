@@ -1,4 +1,5 @@
 import { createBrief } from "./brief";
+import { step } from "./checks";
 import type { Project } from "./types";
 
 const owner = { email: "kprl884@gmail.com", role: "owner" as const };
@@ -42,6 +43,12 @@ export function seedProjects(): Project[] {
       platforms: [{ os: "ios", version: "1.1", status: "Waiting for Review" }],
       open: ["App Store inceleme mesajını aç ve yanıtla."],
       links: [{ label: "GitHub", url: "https://github.com/alparslankopruluu/chordly" }],
+      checks: [
+        step("app_store", "App Store", true, "you"),
+        step("review", "İnceleme mesajı", false, "you"),
+        step("google_play", "Google Play", false, "later"),
+        step("ads", "Reklam", false, "later"),
+      ],
     }),
     project({
       id: "bark",
@@ -54,6 +61,12 @@ export function seedProjects(): Project[] {
       stack: "Firebase",
       platforms: [{ os: "ios", version: "1.0.0", status: "Prepare for Submission" }],
       open: ["Gönderimden önce eksik sürüm ve mağaza alanlarını kapat."],
+      checks: [
+        step("app_store", "App Store", false, "you"),
+        step("screenshots", "Mağaza görselleri", false, "you"),
+        step("google_play", "Google Play", false, "later"),
+        step("ads", "Reklam", false, "later"),
+      ],
     }),
     project({
       id: "archvia",
@@ -69,6 +82,12 @@ export function seedProjects(): Project[] {
       links: [
         { label: "GitHub", url: "https://github.com/alparslankopruluu/Archvia" },
         { label: "Web repo", url: "https://github.com/alparslankopruluu/archiava-web" },
+      ],
+      checks: [
+        step("app_store", "App Store", false, "you"),
+        step("screenshots", "Mağaza görselleri", false, "you"),
+        step("web", "Web", false, "later"),
+        step("google_play", "Google Play", false, "later"),
       ],
     }),
     project({
@@ -89,6 +108,12 @@ export function seedProjects(): Project[] {
         { label: "Android repo", url: "https://github.com/alparslankopruluu/simetra-android" },
         { label: "Web repo", url: "https://github.com/alparslankopruluu/simetra-web-" },
       ],
+      checks: [
+        step("app_store", "App Store", true, "you"),
+        step("google_play", "Google Play", false, "you"),
+        step("ads", "Reklam", false, "you"),
+        step("web", "Web", false, "later"),
+      ],
     }),
     project({
       id: "belto",
@@ -102,6 +127,12 @@ export function seedProjects(): Project[] {
       platforms: [{ os: "ios", version: "1.0.0", status: "Waiting for Review" }],
       open: ["İnceleme sonucunu bekle."],
       links: [{ label: "GitHub", url: "https://github.com/alparslankopruluu/belto" }],
+      checks: [
+        step("app_store", "App Store", true, "you"),
+        step("review", "İnceleme", false, "apple"),
+        step("google_play", "Google Play", false, "later"),
+        step("ads", "Reklam", false, "later"),
+      ],
     }),
     project({
       id: "screenmotion",
@@ -114,6 +145,12 @@ export function seedProjects(): Project[] {
       stack: "Firebase",
       platforms: [{ os: "ios", version: "1.0.2", status: "Waiting for Review" }],
       open: ["İnceleme sonucunu bekle.", "GitHub reposunu bağla."],
+      checks: [
+        step("app_store", "App Store", true, "you"),
+        step("review", "İnceleme", false, "apple"),
+        step("repo", "Repo bağla", false, "you"),
+        step("google_play", "Google Play", false, "later"),
+      ],
     }),
     project({
       id: "artpromt",
@@ -132,6 +169,13 @@ export function seedProjects(): Project[] {
       links: [
         { label: "GitHub", url: "https://github.com/alparslankopruluu/promtart" },
         { label: "Web repo", url: "https://github.com/alparslankopruluu/artpromt" },
+      ],
+      checks: [
+        step("app_store", "App Store", true, "you"),
+        step("review", "İnceleme", false, "apple"),
+        step("web", "Web", true, "you"),
+        step("google_play", "Google Play", false, "later"),
+        step("ads", "Reklam", false, "later"),
       ],
     }),
     project({
@@ -152,6 +196,12 @@ export function seedProjects(): Project[] {
         { label: "GitHub", url: "https://github.com/alparslankopruluu/salonbook" },
         { label: "Web repo", url: "https://github.com/alparslankopruluu/aynaweb" },
       ],
+      checks: [
+        step("app_store", "App Store", true, "you"),
+        step("web", "Web", true, "you"),
+        step("google_play", "Google Play", false, "later"),
+        step("ads", "Reklam", false, "later"),
+      ],
     }),
     project({
       id: "ayna-partner",
@@ -165,6 +215,11 @@ export function seedProjects(): Project[] {
       platforms: [{ os: "ios", version: "1.1.9", status: "Ready for Distribution" }],
       open: ["Metrik bozulursa sürüm planla."],
       links: [{ label: "GitHub", url: "https://github.com/alparslankopruluu/salonpro_business" }],
+      checks: [
+        step("app_store", "App Store", true, "you"),
+        step("google_play", "Google Play", false, "later"),
+        step("ads", "Reklam", false, "later"),
+      ],
     }),
     project({
       id: "draft",
@@ -178,6 +233,11 @@ export function seedProjects(): Project[] {
       platforms: [{ os: "ios", version: "1.1.2", status: "Ready for Distribution" }],
       open: ["Metrik bozulursa sürüm planla."],
       links: [{ label: "GitHub", url: "https://github.com/alparslankopruluu/pinnedly" }],
+      checks: [
+        step("app_store", "App Store", true, "you"),
+        step("google_play", "Google Play", false, "later"),
+        step("ads", "Reklam", false, "later"),
+      ],
     }),
   ];
 }

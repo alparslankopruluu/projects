@@ -30,6 +30,15 @@ export type ProjectLink = {
   url: string;
 };
 
+export type CheckOwner = "you" | "apple" | "later";
+
+export type CheckItem = {
+  id: string;
+  label: string;
+  done: boolean;
+  owner: CheckOwner;
+};
+
 export type Project = {
   id: string;
   name: string;
@@ -41,6 +50,7 @@ export type Project = {
   stack: string;
   platforms: Platform[];
   links: ProjectLink[];
+  checks: CheckItem[];
   notes: Note[];
   brief: string;
   briefUpdatedAt: string | null;

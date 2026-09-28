@@ -19,6 +19,7 @@ import {
 } from "firebase/auth";
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { createBrief } from "./brief";
+import { step, withChecks } from "./checks";
 import { connectFirebase, readStoredConfig } from "./firebase";
 import { seedProjects } from "./seed";
 import type { Attention, Note, Project } from "./types";
@@ -68,7 +69,7 @@ function readProjects(raw: string | null): Project[] {
   try {
     const parsed = JSON.parse(raw) as Project[];
     if (!Array.isArray(parsed) || parsed.length === 0) return SERVER_PROJECTS;
-    return sorted(parsed);
+    return sorted(parsed.map((project) => withChecks(project)));
   } catch {
     return SERVER_PROJECTS;
   }
@@ -256,6 +257,7 @@ export function ShelfProvider({ children }: { children: ReactNode }) {
       let n = 2;
       while (taken.has(id)) id = `${slug(input.name)}-${n++}`;
       const platforms = [{ os: "ios" as const, version: input.version || "—", status: input.status || "Taslak" }];
+      const submitted = input.attention === "live" || input.attention === "ready" || input.attention === "waiting_review" || input.attention === "review_message";
       const repo = input.repo.trim();
       const project: Project = {
         id,
@@ -268,6 +270,17 @@ export function ShelfProvider({ children }: { children: ReactNode }) {
         stack: "",
         platforms,
         links: repo ? [{ label: "GitHub", url: `https://github.com/${repo}` }] : [],
+        checks: [
+          step("app_store", "App Store", submitted, "you"),
+          ...(input.attention === "review_message"
+            ? [step("review", "İnceleme mesajı", false, "you" as const)]
+            : input.attention === "waiting_review"
+              ? [step("review", "İnceleme", false, "apple" as const)]
+              : []),
+          step("google_play", "Google Play", false, "later"),
+          step("web", "Web", false, "later"),
+          step("ads", "Reklam", false, "later"),
+        ],
         notes: [],
         members: [{ email: email ?? "kprl884@gmail.com", role: "owner" }],
         briefUpdatedAt: null,
