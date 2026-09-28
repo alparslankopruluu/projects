@@ -30,6 +30,8 @@ export type ProjectLink = {
   url: string;
 };
 
+export type BusinessType = "consumer_subscription" | "consumer_credits" | "saas" | "marketplace" | "internal";
+
 export type CheckOwner = "you" | "apple" | "later";
 
 export type CheckItem = {
@@ -48,6 +50,7 @@ export type Project = {
   repo: string;
   firebaseProject: string;
   stack: string;
+  businessType?: BusinessType;
   platforms: Platform[];
   links: ProjectLink[];
   checks: CheckItem[];

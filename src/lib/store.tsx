@@ -20,6 +20,7 @@ import {
 import { collection, deleteDoc, doc, onSnapshot, setDoc } from "firebase/firestore";
 import { createBrief } from "./brief";
 import { step, withChecks } from "./checks";
+import { inferBusiness } from "./ops";
 import { connectFirebase, readStoredConfig } from "./firebase";
 import { seedProjects } from "./seed";
 import type { Attention, Note, Project } from "./types";
@@ -69,7 +70,7 @@ function readProjects(raw: string | null): Project[] {
   try {
     const parsed = JSON.parse(raw) as Project[];
     if (!Array.isArray(parsed) || parsed.length === 0) return SERVER_PROJECTS;
-    return sorted(parsed.map((project) => withChecks(project)));
+    return sorted(parsed.map((project) => ({ ...withChecks(project), businessType: inferBusiness(project) })));
   } catch {
     return SERVER_PROJECTS;
   }

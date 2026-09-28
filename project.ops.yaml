@@ -1,0 +1,8 @@
+project_id: projects
+repos:
+  web: alparslankopruluu/projects
+integrations:
+  firebase: null
+  github: alparslankopruluu/projects
+context:
+  entry: docs/ai/STATE.md

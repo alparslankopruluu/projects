@@ -1,6 +1,6 @@
 # Projects
 
-Bu dosya insanlar ve ajanlar içindir. Yeni bir oturumda önce bunu oku. Burada yazmayanı uzun uzun yeniden çıkarma.
+Kısa özet. Kalıcı bağlam docs/ai altındadır. Yeni oturumda AGENTS.md ve docs/ai/HANDOFF.md okunur.
 
 Güncellendi: 2026-09-27 · ilk sürüm
 

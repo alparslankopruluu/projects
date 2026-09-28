@@ -67,7 +67,8 @@ export async function POST(request: Request) {
       sha: item.sha,
       date: item.commit?.author?.date ?? new Date().toISOString(),
       message: item.commit?.message ?? "",
-    }));
+    }))
+    .filter((item) => item.message.split("\n")[0]?.trim() !== "Update project brief");
 
   if (commits.length === 0) {
     return Response.json({ brief, latestSha: null, changed: false, written: false, message: "Repo'da commit yok." });

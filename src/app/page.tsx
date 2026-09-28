@@ -1,7 +1,7 @@
 "use client";
 
-import { Shelf } from "@/components/Shelf";
+import { Today } from "@/components/Today";
 
 export default function HomePage() {
-  return <Shelf />;
+  return <Today />;
 }
