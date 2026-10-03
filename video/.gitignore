@@ -1,0 +1,4 @@
+node_modules/
+out/*
+!out/kickoff-preview.png
+.DS_Store

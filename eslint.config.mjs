@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Cloud Functions backend has its own tsconfig and toolchain.
+    "functions/**",
+    "mobile/**",
+    "video/**",
   ]),
 ]);
 

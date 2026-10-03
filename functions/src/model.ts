@@ -1,0 +1,155 @@
+// Canonical data model. functions/src/model.ts mirrors this file; change both together.
+// Firestore layout (all under users/{uid}):
+//   projects/{projectId}      Project
+//   signals/{signalId}        Signal      (inbox: notifications from sources, rules and Claude)
+//   metrics/{metricId}        Metric      (one row per project + key + period)
+//   events/{eventId}          StoreEvent  (submissions, rejections, approvals, deploys)
+//   commits/{sha}             Commit
+//   insights/latest           Insight     (last Claude analysis)
+//   private/credentials       Credentials (write-only from the client, read by Functions)
+
+export type Stage = "idea" | "building" | "review" | "live" | "paused";
+
+export type PlatformOs = "ios" | "android" | "web";
+
+export type Platform = {
+  os: PlatformOs;
+  version: string;
+  status: string;
+};
+
+export type SourceKind =
+  | "github"
+  | "vercel"
+  | "firebase"
+  | "supabase"
+  | "appstore"
+  | "googleplay"
+  | "revenuecat"
+  | "claude"
+  | "manual";
+
+export type Connection = {
+  kind: SourceKind;
+  // Identifier inside that service: "owner/repo", Vercel project id, App Store app id, package name…
+  ref: string;
+  mode: "api" | "manual";
+  lastSyncAt: string | null;
+};
+
+export type CheckItem = {
+  id: string;
+  label: string;
+  done: boolean;
+  owner: "you" | "store" | "later";
+};
+
+export type Note = {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: "you" | "claude";
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  tagline: string;
+  hue: number; // 0-360, drives the card gradient
+  stage: Stage;
+  priority: number;
+  nextStep: string;
+  platforms: Platform[];
+  connections: Connection[];
+  checks: CheckItem[];
+  notes: Note[];
+  startedAt: string;
+  lastActivityAt: string;
+  archived: boolean;
+};
+
+export type Severity = "critical" | "warning" | "info" | "success";
+
+export type Signal = {
+  id: string;
+  projectId: string | null;
+  source: SourceKind;
+  severity: Severity;
+  title: string;
+  body: string;
+  createdAt: string;
+  read: boolean;
+  // Stable key so a sync job can upsert instead of duplicating the same alert.
+  dedupeKey: string;
+};
+
+export type MetricKey = "downloads" | "revenue" | "activeUsers" | "crashFree" | "rating" | "trials" | "deploys";
+
+export type Metric = {
+  id: string;
+  projectId: string;
+  key: MetricKey;
+  value: number;
+  previous: number | null;
+  period: "day" | "week" | "month";
+  source: SourceKind;
+  recordedAt: string;
+};
+
+export type StoreEventKind = "submitted" | "in_review" | "rejected" | "approved" | "released" | "deploy_failed" | "deployed";
+
+export type StoreEvent = {
+  id: string;
+  projectId: string;
+  source: SourceKind;
+  kind: StoreEventKind;
+  version: string;
+  detail: string;
+  at: string;
+};
+
+export type Commit = {
+  sha: string;
+  projectId: string;
+  repo: string;
+  message: string;
+  at: string;
+};
+
+export type Insight = {
+  generatedAt: string;
+  model: string;
+  headline: string;
+  focus: { projectId: string | null; action: string; why: string }[];
+  risks: { projectId: string | null; title: string; detail: string }[];
+};
+
+export const STAGE_LABEL: Record<Stage, string> = {
+  idea: "Fikir",
+  building: "Yapılıyor",
+  review: "İncelemede",
+  live: "Yayında",
+  paused: "Durdu",
+};
+
+export const SOURCE_LABEL: Record<SourceKind, string> = {
+  github: "GitHub",
+  vercel: "Vercel",
+  firebase: "Firebase",
+  supabase: "Supabase",
+  appstore: "App Store",
+  googleplay: "Google Play",
+  revenuecat: "RevenueCat",
+  claude: "Claude",
+  manual: "Elle",
+};
+
+export const METRIC_LABEL: Record<MetricKey, string> = {
+  downloads: "İndirme",
+  revenue: "Gelir",
+  activeUsers: "Aktif kullanıcı",
+  crashFree: "Crash-free",
+  rating: "Puan",
+  trials: "Deneme",
+  deploys: "Deploy",
+};

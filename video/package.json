@@ -1,0 +1,24 @@
+{
+  "name": "projects-video",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remotion videos for Projects: kickoff vision film and parameterized project stage clips.",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render:kickoff": "remotion render src/index.ts Kickoff out/kickoff.mp4",
+    "render:stage": "remotion render src/index.ts ProjectStage out/stage.mp4 --props=./props/example-stage.json",
+    "still:kickoff": "remotion still src/index.ts Kickoff out/kickoff-preview.png --frame=300",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.530",
+    "@remotion/google-fonts": "4.0.530",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "remotion": "4.0.530"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "typescript": "7.0.2"
+  }
+}

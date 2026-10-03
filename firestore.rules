@@ -1,8 +1,21 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId}/projects/{projectId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Mobile app data: users/{uid}/{collection}/{doc} (projects, signals, metrics, events, commits, insights).
+    // Cloud Functions use the Admin SDK and bypass these rules.
+    match /users/{userId}/{collection}/{docId} {
+      allow read, write: if isOwner(userId) && collection != "private";
+    }
+
+    // users/{uid}/private/{doc} holds source credentials: the owner may create/update them,
+    // but can never read (or delete) them back. Only Functions read this.
+    match /users/{userId}/private/{docId} {
+      allow create, update: if isOwner(userId);
+      allow read, delete: if false;
     }
 
     function isMember(workspaceId) {

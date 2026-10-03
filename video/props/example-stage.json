@@ -1,0 +1,18 @@
+{
+  "name": "Chordly",
+  "hue": 254,
+  "stage": "middle",
+  "headline": "Akor kütüphanesi hazır, App Store incelemesi yolda.",
+  "stats": [
+    { "label": "Görev", "value": "18" },
+    { "label": "Build", "value": "42" },
+    { "label": "Beta", "value": "1.240" }
+  ],
+  "checklist": [
+    { "label": "Akor motoru", "done": true },
+    { "label": "Paywall", "done": true },
+    { "label": "TestFlight", "done": true },
+    { "label": "App Store metinleri", "done": false },
+    { "label": "Apple mesajını yanıtla", "done": false }
+  ]
+}
