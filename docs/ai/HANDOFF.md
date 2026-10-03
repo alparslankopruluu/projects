@@ -26,4 +26,4 @@ Unfinished:
 
 Next exact action: Configure Firebase (EXPO_PUBLIC_FIREBASE_* and a deployed sync function), then connect one App Store key and confirm Analytics moves that app from "bağlı değil" to a real number.
 
-Last relevant commit: d264192
+Last relevant commit: fe1af7a
