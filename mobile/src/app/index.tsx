@@ -5,6 +5,7 @@ import Animated, { FadeIn, FadeInDown, ZoomIn } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useStore } from "@/data/store";
+import { staleCaptures } from "@/domain/basket";
 import { greeting, inboxCounts, isUnfinished, portfolioMetric, progressOf, stageCounts, todaysFocus } from "@/domain/derive";
 import { STAGE_LABEL } from "@/domain/model";
 import { Button, Icon, RoundButton, Section, tap, Txt } from "@/ui/kit";
@@ -17,7 +18,8 @@ export default function Home() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const store = useStore();
-  const { projects, signals, metrics, insight, status } = store;
+  const { projects, signals, metrics, insight, status, captures } = store;
+  const stale = staleCaptures(captures);
 
   const view = useMemo(() => {
     const active = projects.filter((item) => !item.archived).sort((a, b) => a.priority - b.priority);
@@ -48,8 +50,30 @@ export default function Home() {
               </Txt>
               <Txt variant="display">{greeting()}</Txt>
             </View>
-            <RoundButton icon="person-circle-outline" label="Hesap" onPress={() => router.push("/settings")} />
+            <View style={{ flexDirection: "row", gap: space.sm }}>
+              <RoundButton icon="basket-outline" label="Sepet" onPress={() => router.push("/basket")} />
+              <RoundButton icon="person-circle-outline" label="Hesap" onPress={() => router.push("/settings")} />
+            </View>
           </Animated.View>
+
+          {stale.length ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Okunmamış sepet"
+              onPress={() => {
+                tap();
+                router.push("/basket");
+              }}
+              style={{ backgroundColor: p.surface, borderRadius: radius.lg, padding: space.lg, gap: 4 }}>
+              <Txt variant="heading">Sepete {stale.length} şey attın, hâlâ okumadın.</Txt>
+              <Txt tone="soft" numberOfLines={2}>
+                {stale
+                  .slice(0, 3)
+                  .map((item) => item.title)
+                  .join(" · ")}
+              </Txt>
+            </Pressable>
+          ) : null}
 
           {/* The four questions, answered at a glance. Every card opens its own detail page. */}
           <View style={{ gap: space.md }}>

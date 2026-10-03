@@ -6,6 +6,7 @@ import Animated, { FadeInDown } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useStore } from "@/data/store";
+import { openRejection } from "@/domain/basket";
 import { daysSince, latestMetric, momentOf, progressOf, sortSignals, type Moment } from "@/domain/derive";
 import { METRIC_LABEL, SOURCE_LABEL, STAGE_LABEL, type MetricKey, type Stage } from "@/domain/model";
 import { Button, Chip, Divider, Empty, Field, Icon, Pill, RoundButton, Section, Surface, tap, Txt } from "@/ui/kit";
@@ -52,6 +53,7 @@ export default function ProjectDetail() {
 
   const progress = progressOf(project);
   const moment = momentOf(project);
+  const rejection = openRejection(store.events, project.id);
   const signals = sortSignals(store.signals.filter((item) => item.projectId === project.id));
   const ink = hueInk(project.hue, p.dark);
 
@@ -117,6 +119,16 @@ export default function ProjectDetail() {
               </Txt>
             </Surface>
           </Animated.View>
+
+          {rejection ? (
+            <Surface style={{ gap: space.sm }}>
+              <Txt variant="heading">
+                {rejection.version} reddedildi
+              </Txt>
+              <Txt tone="soft">{rejection.detail || "Gerekçe yazılmamış. Kaynaklar ekranından ekleyebilirsin."}</Txt>
+              <Button label="Düzeltme işlerini ekle" icon="alert-circle-outline" onPress={() => store.addRejectionWork(project.id)} />
+            </Surface>
+          ) : null}
 
           {signals.length ? (
             <Section title="Bildirimler" delay={160}>
@@ -239,7 +251,10 @@ export default function ProjectDetail() {
           <Section title="Notlar" delay={360}>
             <Surface style={{ gap: space.md }}>
               <Field value={note} onChangeText={setNote} placeholder="Bir sonraki oturum ne bilmeli?" multiline style={{ minHeight: 80, textAlignVertical: "top" }} />
-              <Button label="Not ekle" icon="create-outline" onPress={submitNote} disabled={!note.trim()} />
+              <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
+                <Button label="Not ekle" icon="create-outline" onPress={submitNote} disabled={!note.trim()} />
+                <Button label="Sepete at" icon="basket-outline" tone="ghost" onPress={sendToBasket} disabled={!note.trim()} />
+              </View>
             </Surface>
             {project.notes.map((item) => (
               <Surface key={item.id} style={{ gap: 6 }}>
@@ -269,6 +284,13 @@ export default function ProjectDetail() {
     const body = note.trim();
     if (!body || !project) return;
     store.addNote(project.id, body);
+    setNote("");
+  }
+
+  function sendToBasket() {
+    const body = note.trim();
+    if (!body || !project) return;
+    store.addCapture({ title: `${project.name} notu`, body, url: "", kind: "note", projectId: project.id });
     setNote("");
   }
 

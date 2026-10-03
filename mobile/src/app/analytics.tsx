@@ -4,8 +4,9 @@ import { Pressable, StyleSheet, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withDelay, withSpring } from "react-native-reanimated";
 
 import { useStore } from "@/data/store";
+import { demandRank, sourceCoverage } from "@/domain/basket";
 import { latestMetric, portfolioMetric, stageCounts } from "@/domain/derive";
-import { METRIC_LABEL, STAGE_LABEL, type MetricKey, type Stage } from "@/domain/model";
+import { METRIC_LABEL, SOURCE_LABEL, STAGE_LABEL, type MetricKey, type Stage } from "@/domain/model";
 import { Icon, Screen, Section, Surface, Txt } from "@/ui/kit";
 import { CountUp } from "@/ui/motion";
 import { STAGE_COLOR, accent, hueSolid, space, usePalette } from "@/ui/theme";
@@ -43,6 +44,8 @@ export default function Analytics() {
     .sort((a, b) => (b.row?.value ?? 0) - (a.row?.value ?? 0));
   const maxRevenue = Math.max(1, ...revenueRows.map((item) => item.row?.value ?? 0));
   const maxCommits = Math.max(1, ...week.map((item) => item.count));
+  const coverage = sourceCoverage(active);
+  const demand = demandRank(active, metrics);
 
   return (
     <Screen title="Analitik" subtitle="Sadece bağlı ya da elle girilen veri. Tahmin yok.">
@@ -74,6 +77,49 @@ export default function Analytics() {
           );
         })}
       </View>
+
+      <Section title="Mağaza ve para" delay={80}>
+        <View style={{ gap: space.sm }}>
+          {coverage.map((row) => (
+            <Pressable key={row.kind} onPress={() => router.push("/sources")}>
+              <Surface style={{ gap: 4 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                  <Txt variant="heading">{SOURCE_LABEL[row.kind]}</Txt>
+                  <Txt variant="caption" tone={row.liveSync ? accent.mint : "faint"}>
+                    {row.liveSync ? "API hazır" : "Şimdilik elle"}
+                  </Txt>
+                </View>
+                <Txt variant="caption" tone="soft">
+                  {row.api} otomatik · {row.manual} elle · {row.missing} bağlı değil
+                </Txt>
+              </Surface>
+            </Pressable>
+          ))}
+        </View>
+      </Section>
+
+      <Section title="Talep" delay={100}>
+        <Surface style={{ gap: space.md }}>
+          <Txt variant="caption" tone="soft">
+            Sadece girilmiş indirme, gelir veya aktif kullanıcı. Boş satır ölçülmüyor; sıra uydurulmaz.
+          </Txt>
+          {demand.map((row) => (
+            <Pressable key={row.project.id} onPress={() => router.push(`/apps/${row.project.id}`)} style={{ gap: 2 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", gap: space.sm }}>
+                <Txt variant="label">{row.project.name}</Txt>
+                <Txt variant="caption" tone={row.measured ? "soft" : "faint"}>
+                  {row.measured ? "talep var" : "ölçülmüyor"}
+                </Txt>
+              </View>
+              <Txt variant="caption" tone="faint">
+                {row.measured
+                  ? `${row.downloads ? formatMetric("downloads", row.downloads.value) + " indirme" : "indirme yok"} · ${row.revenue ? formatMetric("revenue", row.revenue.value) : "gelir yok"}`
+                  : "Proje sayfasından gir veya kaynağı bağla"}
+              </Txt>
+            </Pressable>
+          ))}
+        </Surface>
+      </Section>
 
       <Section title="Portföy" delay={120}>
         <Surface style={{ gap: space.md }}>

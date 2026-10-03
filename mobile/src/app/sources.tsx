@@ -47,6 +47,20 @@ export default function Sources() {
 
   return (
     <Screen title="Kaynaklar" subtitle="API ile bağla ya da elle gir. İkisi de aynı akışa düşer.">
+      <Section title="Sayılar nereden gelir">
+        <Surface style={{ gap: space.sm }}>
+          <Txt>
+            App Store, GitHub, Vercel ve Supabase bir API anahtarıyla çekilir. Anahtar bu telefonda durmaz; Firebase hesabına yazılır, sadece sunucu okur.
+          </Txt>
+          <Txt>
+            Google Play, RevenueCat ve Firebase çökme oranı henüz otomatik değil. Bağlantıyı kaydedersin, sayıyı proje sayfasından elle girersin. Ekran "bağlı değil" der, örnek gelir yazmaz.
+          </Txt>
+          <Txt>
+            GitHub'daki .md dosyası projenin adını, todo'sunu ve niyetini taşır. Gelir, indirme ve crash orası için değil; public repoda bayatlar ve sızar. MCP, bu uygulamanın içindeki senkron değil. Notion bağlı değil; okuma listesi sepettir.
+          </Txt>
+        </Surface>
+      </Section>
+
       <Section title="Proje">
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
           {store.projects.map((item) => (

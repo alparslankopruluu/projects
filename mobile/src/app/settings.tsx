@@ -59,7 +59,25 @@ export default function Settings() {
         </Txt>
       ) : null}
 
+      <Section title="Plan" delay={80}>
+        <Surface style={{ gap: space.sm }}>
+          <Txt variant="heading">{store.plan === "pro" ? "Pro" : "Ücretsiz"}</Txt>
+          <Txt tone="soft">
+            Sepet ve elle girilen istatistik her planda açık. Fikir üretmek de açık. Ücretsiz planda üç fikir saklanır; projeye yazmak aynı limite girer. Ödeme
+            bağlı değil, bu anahtar bir önizleme.
+          </Txt>
+          <Button
+            label={store.plan === "pro" ? "Ücretsiz planı önizle" : "Pro masaya dön"}
+            tone="ghost"
+            icon="diamond-outline"
+            onPress={() => store.setPlan(store.plan === "pro" ? "free" : "pro")}
+          />
+        </Surface>
+      </Section>
+
       <Section title="Diğer" delay={120}>
+        <Button label="Sepet" tone="ghost" icon="basket-outline" onPress={() => router.push("/basket")} />
+        <Button label="Fikirler" tone="ghost" icon="bulb-outline" onPress={() => router.push("/ideas")} />
         <Button label="Kaynaklar ve API anahtarları" tone="ghost" icon="link-outline" onPress={() => router.push("/sources")} />
         <Button label="Tanıtım videosu" tone="ghost" icon="play-circle-outline" onPress={() => router.push("/intro")} />
         {store.mode === "local" ? <Button label="Yerel veriyi sıfırla" tone="ghost" icon="refresh" onPress={store.resetLocal} /> : null}

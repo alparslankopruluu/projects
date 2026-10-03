@@ -5,18 +5,32 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
 } from "firebase/auth";
-import { arrayUnion, collection, doc, onSnapshot, setDoc, writeBatch } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import {
+  HALLOWEEN,
+  REJECTION_CHECKS,
+  canKeepIdea,
+  ideasFromBasket,
+  missingChecks,
+  prepareCapture,
+  REMIND_AFTER_DAYS,
+} from "@/domain/basket";
 import type {
+  Capture,
+  CaptureKind,
   CheckItem,
+  CheckKind,
   Commit,
   Connection,
+  Idea,
   Insight,
   Metric,
   MetricKey,
   Note,
+  Plan,
   Project,
   Signal,
   StoreEvent,
@@ -33,10 +47,14 @@ export type Workspace = {
   metrics: Metric[];
   events: StoreEvent[];
   commits: Commit[];
+  captures: Capture[];
+  ideas: Idea[];
+  /** This studio starts on Pro. Billing is not connected, so the flag is a product gate, not a charge. */
+  plan: Plan;
   insight: Insight | null;
 };
 
-type ListKey = Exclude<keyof Workspace, "insight">;
+type ListKey = Exclude<keyof Workspace, "insight" | "plan">;
 
 const ID_FIELD: Record<ListKey, "id" | "sha"> = {
   projects: "id",
@@ -44,10 +62,39 @@ const ID_FIELD: Record<ListKey, "id" | "sha"> = {
   metrics: "id",
   events: "id",
   commits: "sha",
+  captures: "id",
+  ideas: "id",
 };
 
 function seedWorkspace(): Workspace {
-  return { projects: seedProjects(), signals: seedSignals(), metrics: [], events: [], commits: [], insight: null };
+  return {
+    projects: seedProjects(),
+    signals: seedSignals(),
+    metrics: [],
+    events: [],
+    commits: [],
+    captures: [],
+    ideas: [],
+    plan: "pro",
+    insight: null,
+  };
+}
+
+function hydrateWorkspace(parsed: Partial<Workspace>): Workspace {
+  const base = seedWorkspace();
+  return {
+    ...base,
+    ...parsed,
+    projects: Array.isArray(parsed.projects) && parsed.projects.length > 0 ? parsed.projects : base.projects,
+    signals: Array.isArray(parsed.signals) ? parsed.signals : base.signals,
+    metrics: Array.isArray(parsed.metrics) ? parsed.metrics : [],
+    events: Array.isArray(parsed.events) ? parsed.events : [],
+    commits: Array.isArray(parsed.commits) ? parsed.commits : [],
+    captures: Array.isArray(parsed.captures) ? parsed.captures : [],
+    ideas: Array.isArray(parsed.ideas) ? parsed.ideas : [],
+    plan: parsed.plan === "free" ? "free" : "pro",
+    insight: parsed.insight ?? null,
+  };
 }
 
 export function newId() {
@@ -80,8 +127,17 @@ type StoreValue = Workspace & {
   updateProject: (id: string, patch: Partial<Project>) => void;
   addProject: (input: Pick<Project, "name" | "tagline" | "stage" | "nextStep">) => string;
   toggleCheck: (projectId: string, checkId: string) => void;
-  addCheck: (projectId: string, label: string, owner: CheckItem["owner"]) => void;
+  addCheck: (projectId: string, label: string, owner: CheckItem["owner"], kind?: CheckKind) => void;
   addNote: (projectId: string, body: string) => void;
+  addCapture: (input: { title: string; body: string; url: string; kind: CaptureKind; projectId: string | null }) => void;
+  updateCapture: (id: string, patch: Partial<Pick<Capture, "read" | "category" | "kind">>) => void;
+  removeCapture: (id: string) => void;
+  mintIdeas: () => number;
+  keepIdea: (id: string) => boolean;
+  applyIdea: (id: string) => boolean;
+  setPlan: (plan: Plan) => void;
+  addSeasonChecks: () => number;
+  addRejectionWork: (projectId: string) => void;
   addConnection: (projectId: string, connection: Connection) => void;
   removeConnection: (projectId: string, kind: Connection["kind"], ref: string) => void;
   addMetric: (projectId: string, key: MetricKey, value: number) => void;
@@ -119,7 +175,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (!raw) return;
         const parsed = JSON.parse(raw) as Partial<Workspace>;
         if (Array.isArray(parsed.projects) && parsed.projects.length > 0) {
-          setWorkspace({ ...seedWorkspace(), ...parsed } as Workspace);
+          setWorkspace(hydrateWorkspace(parsed));
         }
       })
       .catch(() => undefined)
@@ -143,18 +199,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!user) return;
 
       const root = (name: string) => collection(fb.db, "users", user.uid, name);
-      let migrated = false;
+      const uploaded = new Set<ListKey>();
       (Object.keys(ID_FIELD) as ListKey[]).forEach((key) => {
         stops.push(
           onSnapshot(root(key), (snapshot) => {
-            if (key === "projects" && snapshot.empty && !migrated) {
-              migrated = true;
-              const batch = writeBatch(fb.db);
-              const local = latest.current;
-              for (const project of local.projects) batch.set(doc(fb.db, "users", user.uid, "projects", project.id), project);
-              for (const signal of local.signals) batch.set(doc(fb.db, "users", user.uid, "signals", signal.id), signal);
-              for (const metric of local.metrics) batch.set(doc(fb.db, "users", user.uid, "metrics", metric.id), metric);
-              void batch.commit();
+            // An empty cloud collection must not wipe a local list. Upload once, then wait for the echo.
+            if (snapshot.empty) {
+              if (!uploaded.has(key)) {
+                uploaded.add(key);
+                const local = latest.current[key];
+                if (local.length > 0) {
+                  const batch = writeBatch(fb.db);
+                  for (const item of local) {
+                    const id = String((item as Record<string, unknown>)[ID_FIELD[key]]);
+                    batch.set(doc(fb.db, "users", user.uid, key, id), item);
+                  }
+                  void batch.commit();
+                }
+              }
               return;
             }
             const rows = snapshot.docs.map((item) => item.data());
@@ -165,6 +227,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       stops.push(
         onSnapshot(doc(fb.db, "users", user.uid, "insights", "latest"), (snapshot) => {
           setWorkspace((current) => ({ ...current, insight: snapshot.exists() ? (snapshot.data() as Insight) : current.insight }));
+        }),
+      );
+      stops.push(
+        onSnapshot(doc(fb.db, "users", user.uid, "desk", "profile"), (snapshot) => {
+          if (!snapshot.exists()) {
+            void setDoc(doc(fb.db, "users", user.uid, "desk", "profile"), { plan: latest.current.plan });
+            return;
+          }
+          const plan = snapshot.data().plan === "free" ? "free" : "pro";
+          setWorkspace((current) => ({ ...current, plan }));
         }),
       );
     });
@@ -185,6 +257,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const id = String((item as Record<string, unknown>)[idField]);
         void setDoc(doc(fb.db, "users", uid, key, id), item);
       }
+    },
+    [fb, uid],
+  );
+
+  const drop = useCallback(
+    (key: "captures" | "ideas", id: string) => {
+      setWorkspace((current) => ({
+        ...current,
+        [key]: current[key].filter((item) => item.id !== id),
+      }));
+      if (fb && uid) void deleteDoc(doc(fb.db, "users", uid, key, id));
+    },
+    [fb, uid],
+  );
+
+  const replaceIdeas = useCallback(
+    (items: Idea[]) => {
+      const previous = latest.current.ideas;
+      setWorkspace((current) => ({ ...current, ideas: items }));
+      if (!fb || !uid) return;
+      const nextIds = new Set(items.map((item) => item.id));
+      const batch = writeBatch(fb.db);
+      for (const item of items) batch.set(doc(fb.db, "users", uid, "ideas", item.id), item);
+      for (const item of previous) {
+        if (!nextIds.has(item.id)) batch.delete(doc(fb.db, "users", uid, "ideas", item.id));
+      }
+      void batch.commit();
     },
     [fb, uid],
   );
@@ -248,10 +347,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ...project,
           checks: project.checks.map((item) => (item.id === checkId ? { ...item, done: !item.done } : item)),
         })),
-      addCheck: (projectId, label, owner) =>
+      addCheck: (projectId, label, owner, kind) =>
         withProject(projectId, (project) => ({
           ...project,
-          checks: [...project.checks, { id: newId(), label, done: false, owner }],
+          checks: [...project.checks, { id: newId(), label, done: false, owner, ...(kind ? { kind } : {}) }],
         })),
       addNote: (projectId, body) =>
         withProject(projectId, (project) => {
@@ -309,6 +408,123 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       markAllRead: () => {
         for (const signal of latest.current.signals) if (!signal.read) put("signals", { ...signal, read: true });
       },
+      addCapture: (input) => {
+        const title = input.title.trim();
+        const body = input.body.trim();
+        if (!title && !body) return;
+        const prepared = prepareCapture({ ...input, title, body });
+        const item: Capture = {
+          id: newId(),
+          title: title || body.slice(0, 80),
+          body,
+          url: input.url.trim(),
+          kind: prepared.kind,
+          category: prepared.category,
+          projectId: input.projectId,
+          read: false,
+          createdAt: new Date().toISOString(),
+          remindAfterDays: REMIND_AFTER_DAYS,
+        };
+        put("captures", item);
+      },
+      updateCapture: (id, patch) => {
+        const current = latest.current.captures.find((item) => item.id === id);
+        if (!current) return;
+        put("captures", { ...current, ...patch });
+      },
+      removeCapture: (id) => drop("captures", id),
+      mintIdeas: () => {
+        const now = new Date().toISOString();
+        const kept = latest.current.ideas.filter((item) => item.kept);
+        const fresh: Idea[] = ideasFromBasket(latest.current.captures, latest.current.projects).map((item) => ({
+          ...item,
+          id: newId(),
+          createdAt: now,
+          kept: false,
+        }));
+        replaceIdeas([...kept, ...fresh]);
+        return fresh.length;
+      },
+      keepIdea: (id) => {
+        const idea = latest.current.ideas.find((item) => item.id === id);
+        if (!idea || idea.kept) return Boolean(idea?.kept);
+        const kept = latest.current.ideas.filter((item) => item.kept).length;
+        if (!canKeepIdea(latest.current.plan, kept)) return false;
+        put("ideas", { ...idea, kept: true });
+        return true;
+      },
+      applyIdea: (id) => {
+        const idea = latest.current.ideas.find((item) => item.id === id);
+        if (!idea) return false;
+        const keptOthers = latest.current.ideas.filter((item) => item.kept && item.id !== id).length;
+        if (!canKeepIdea(latest.current.plan, keptOthers)) return false;
+        const now = new Date().toISOString();
+        if (idea.target === "new" || !idea.projectId) {
+          const projectId = newId();
+          put("projects", {
+            id: projectId,
+            name: idea.title.slice(0, 42),
+            tagline: "Sepetten açıldı",
+            hue: Math.floor(Math.random() * 360),
+            stage: "idea",
+            priority: latest.current.projects.length,
+            nextStep: idea.body.slice(0, 180),
+            platforms: [],
+            connections: [],
+            checks: [{ id: newId(), label: "Fikri bir cümlelik ürüne indir", done: false, owner: "you", kind: "task" }],
+            notes: [{ id: newId(), body: idea.body, createdAt: now, author: "you" }],
+            startedAt: now,
+            lastActivityAt: now,
+            archived: false,
+          });
+          put("ideas", { ...idea, kept: true, projectId, target: "new" });
+          return true;
+        }
+        withProject(idea.projectId, (project) => ({
+          ...project,
+          nextStep: idea.title,
+          checks: project.checks.some((item) => item.label === idea.title)
+            ? project.checks
+            : [...project.checks, { id: newId(), label: idea.title, done: false, owner: "you" as const, kind: "task" as const }],
+          notes: [{ id: newId(), body: idea.body, createdAt: now, author: "you" as const }, ...project.notes],
+        }));
+        put("ideas", { ...idea, kept: true });
+        return true;
+      },
+      setPlan: (plan) => {
+        setWorkspace((current) => ({ ...current, plan }));
+        if (fb && uid) void setDoc(doc(fb.db, "users", uid, "desk", "profile"), { plan }, { merge: true });
+      },
+      addSeasonChecks: () => {
+        let added = 0;
+        for (const project of latest.current.projects) {
+          if (project.archived || project.stage !== "live") continue;
+          const extra = missingChecks(project, HALLOWEEN.checks);
+          if (extra.length === 0) continue;
+          added += extra.length;
+          withProject(project.id, (current) => ({
+            ...current,
+            checks: [
+              ...current.checks,
+              ...extra.map((item) => ({ id: newId(), label: item.label, done: false, owner: item.owner, kind: item.kind })),
+            ],
+          }));
+        }
+        return added;
+      },
+      addRejectionWork: (projectId) => {
+        const project = latest.current.projects.find((item) => item.id === projectId);
+        if (!project) return;
+        const extra = missingChecks(project, REJECTION_CHECKS);
+        if (extra.length === 0) return;
+        withProject(projectId, (current) => ({
+          ...current,
+          checks: [
+            ...current.checks,
+            ...extra.map((item) => ({ id: newId(), label: item.label, done: false, owner: item.owner, kind: item.kind })),
+          ],
+        }));
+      },
       saveCredentials: async (patch) => {
         if (!fb || !uid) throw new Error("Anahtarlar yalnızca Firebase hesabında saklanır. Önce giriş yap.");
         // private/* is write-only for the client (firestore.rules); only Functions read it back.
@@ -329,7 +545,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       },
       resetLocal: () => setWorkspace(seedWorkspace()),
     }),
-    [workspace, ready, uid, email, fb, status, put, withProject, callable],
+    [workspace, ready, uid, email, fb, status, put, drop, replaceIdeas, withProject, callable],
   );
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
