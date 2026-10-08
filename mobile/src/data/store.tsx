@@ -5,7 +5,7 @@ import {
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
 } from "firebase/auth";
-import { arrayUnion, collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, doc, getDoc, onSnapshot, query, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -18,6 +18,9 @@ import {
   prepareCapture,
   REMIND_AFTER_DAYS,
 } from "@/domain/basket";
+import { parseClaudeBilling, type ClaudeBilling } from "@/domain/billing";
+import { mergeNoteDocs, noteLabel, parseDeskNote, toDeskNote, type DeskNote } from "@/domain/notes";
+import { parseGrant, parseInvite, type Grant, type Invite, type ShareKind, type ShareRole } from "@/domain/share";
 import type {
   Capture,
   CaptureKind,
@@ -38,6 +41,7 @@ import type {
 import { seedProjects, seedSignals } from "@/domain/seed";
 
 import { firebase } from "./firebase";
+import { createCloudInvite, redeemCloudInvite, removeCloudGrant, setCloudGrantRole } from "./sharing";
 
 const LOCAL_KEY = "projects.workspace.v1";
 
@@ -49,12 +53,21 @@ export type Workspace = {
   commits: Commit[];
   captures: Capture[];
   ideas: Idea[];
-  /** This studio starts on Pro. Billing is not connected, so the flag is a product gate, not a charge. */
+  /** This studio starts on Pro for the idea cap. It does not open Claude. */
   plan: Plan;
+  /** Server-owned. Null until the billing document says this account paid. */
+  claudeBilling: ClaudeBilling | null;
   insight: Insight | null;
+  /** Invites this account created. Not part of the uploaded workspace. */
+  invites: Invite[];
+  /** Canonical grants for people I invited, and grants other people gave me. */
+  grants: Grant[];
+  /** Projects opened by an invite. Never written into this account's projects. */
+  sharedProjects: Project[];
+  sharedNotes: DeskNote[];
 };
 
-type ListKey = Exclude<keyof Workspace, "insight" | "plan">;
+type ListKey = Exclude<keyof Workspace, "insight" | "plan" | "claudeBilling" | "invites" | "grants" | "sharedProjects" | "sharedNotes">;
 
 const ID_FIELD: Record<ListKey, "id" | "sha"> = {
   projects: "id",
@@ -76,7 +89,12 @@ function seedWorkspace(): Workspace {
     captures: [],
     ideas: [],
     plan: "pro",
+    claudeBilling: null,
     insight: null,
+    invites: [],
+    grants: [],
+    sharedProjects: [],
+    sharedNotes: [],
   };
 }
 
@@ -93,7 +111,12 @@ function hydrateWorkspace(parsed: Partial<Workspace>): Workspace {
     captures: Array.isArray(parsed.captures) ? parsed.captures : [],
     ideas: Array.isArray(parsed.ideas) ? parsed.ideas : [],
     plan: parsed.plan === "free" ? "free" : "pro",
+    claudeBilling: null,
     insight: parsed.insight ?? null,
+    invites: [],
+    grants: [],
+    sharedProjects: [],
+    sharedNotes: [],
   };
 }
 
@@ -121,6 +144,7 @@ type Status = { busy: "analyze" | "sync" | null; error: string | null };
 type StoreValue = Workspace & {
   ready: boolean;
   mode: "local" | "cloud";
+  uid: string | null;
   email: string | null;
   cloudAvailable: boolean;
   status: Status;
@@ -129,6 +153,12 @@ type StoreValue = Workspace & {
   toggleCheck: (projectId: string, checkId: string) => void;
   addCheck: (projectId: string, label: string, owner: CheckItem["owner"], kind?: CheckKind) => void;
   addNote: (projectId: string, body: string) => void;
+  updateNote: (projectId: string, noteId: string, patch: Partial<Pick<Note, "body" | "title" | "alarmAt">>) => void;
+  deleteNote: (projectId: string, noteId: string) => void;
+  createInvite: (kind: ShareKind, targetId: string, role: ShareRole) => Promise<Invite>;
+  redeemInvite: (code: string) => Promise<Grant>;
+  setGrantRole: (grantId: string, role: ShareRole) => Promise<void>;
+  removeGrant: (grantId: string) => Promise<void>;
   addCapture: (input: { title: string; body: string; url: string; kind: CaptureKind; projectId: string | null }) => void;
   updateCapture: (id: string, patch: Partial<Pick<Capture, "read" | "category" | "kind">>) => void;
   removeCapture: (id: string) => void;
@@ -163,6 +193,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status>({ busy: null, error: null });
   // Actions read the newest workspace without being rebuilt on every change.
   const latest = useRef(workspace);
+  const noteMirror = useRef<DeskNote[]>([]);
   useEffect(() => {
     latest.current = workspace;
   }, [workspace]);
@@ -184,22 +215,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!ready) return;
-    AsyncStorage.setItem(LOCAL_KEY, JSON.stringify(workspace)).catch(() => undefined);
+    const stored = { ...workspace, invites: [], grants: [], sharedProjects: [], sharedNotes: [], claudeBilling: null };
+    AsyncStorage.setItem(LOCAL_KEY, JSON.stringify(stored)).catch(() => undefined);
   }, [workspace, ready]);
 
   // Cloud mode: every collection under users/{uid} streams into the same workspace shape.
   useEffect(() => {
     if (!fb) return;
     let stops: (() => void)[] = [];
+    let generation = 0;
     const stopAuth = onAuthStateChanged(fb.auth, (user) => {
       stops.forEach((stop) => stop());
       stops = [];
       setUid(user?.uid ?? null);
       setEmail(user?.email ?? null);
-      if (!user) return;
+      if (!user) {
+        noteMirror.current = [];
+        setWorkspace((current) => ({ ...current, claudeBilling: null, invites: [], grants: [], sharedProjects: [], sharedNotes: [] }));
+        return;
+      }
 
       const root = (name: string) => collection(fb.db, "users", user.uid, name);
       const uploaded = new Set<ListKey>();
+      const gen = ++generation;
+      const writeMirrors = (notes: DeskNote[]) => {
+        if (notes.length === 0) return;
+        const batch = writeBatch(fb.db);
+        for (const note of notes.slice(0, 400)) batch.set(doc(fb.db, "users", user.uid, "notes", note.id), note);
+        void batch.commit();
+      };
       (Object.keys(ID_FIELD) as ListKey[]).forEach((key) => {
         stops.push(
           onSnapshot(root(key), (snapshot) => {
@@ -217,13 +261,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   void batch.commit();
                 }
               }
+              if (key === "projects") writeMirrors(latest.current.projects.flatMap((project) => project.notes.map((note) => toDeskNote(note, project.id, project.name))));
               return;
             }
             const rows = snapshot.docs.map((item) => item.data());
+            if (key === "projects") {
+              const projects = rows as Project[];
+              const known = new Set(noteMirror.current.map((note) => note.id));
+              writeMirrors(projects.flatMap((project) => project.notes.filter((note) => !known.has(note.id)).map((note) => toDeskNote(note, project.id, project.name))));
+              setWorkspace((current) => ({ ...current, projects: mergeNoteDocs(projects, noteMirror.current) }));
+              return;
+            }
             setWorkspace((current) => ({ ...current, [key]: rows }));
           }),
         );
       });
+      stops.push(
+        onSnapshot(root("notes"), (snapshot) => {
+          noteMirror.current = snapshot.docs.flatMap((item) => {
+            const parsed = parseDeskNote(item.id, item.data() as Record<string, unknown>);
+            return parsed ? [parsed] : [];
+          });
+          setWorkspace((current) => ({ ...current, projects: mergeNoteDocs(current.projects, noteMirror.current) }));
+        }, () => undefined),
+      );
+      stops.push(
+        onSnapshot(query(collection(fb.db, "invites"), where("ownerId", "==", user.uid)), (snapshot) => {
+          const invites = snapshot.docs.flatMap((item) => {
+            const parsed = parseInvite(item.id, item.data() as Record<string, unknown>);
+            return parsed ? [parsed] : [];
+          });
+          setWorkspace((current) => ({ ...current, invites }));
+        }, () => undefined),
+      );
+      stops.push(
+        onSnapshot(root("grants"), (snapshot) => {
+          void (async () => {
+            const rows: Grant[] = [];
+            for (const item of snapshot.docs) {
+              const parsed = parseGrant(item.id, item.data() as Record<string, unknown>);
+              if (!parsed) continue;
+              if (parsed.ownerId === user.uid) {
+                rows.push(parsed);
+                continue;
+              }
+              const canonical = await getDoc(doc(fb.db, "users", parsed.ownerId, "grants", parsed.id)).catch(() => null);
+              const confirmed = canonical?.exists() ? parseGrant(canonical.id, canonical.data() as Record<string, unknown>) : null;
+              if (confirmed && confirmed.memberId === user.uid) rows.push(confirmed);
+            }
+            if (gen !== generation) return;
+            setWorkspace((current) => ({ ...current, grants: rows }));
+          })();
+        }, () => undefined),
+      );
       stops.push(
         onSnapshot(doc(fb.db, "users", user.uid, "insights", "latest"), (snapshot) => {
           setWorkspace((current) => ({ ...current, insight: snapshot.exists() ? (snapshot.data() as Insight) : current.insight }));
@@ -239,12 +329,59 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           setWorkspace((current) => ({ ...current, plan }));
         }),
       );
+      stops.push(
+        onSnapshot(doc(fb.db, "users", user.uid, "billing", "claude"), (snapshot) => {
+          setWorkspace((current) => ({ ...current, claudeBilling: snapshot.exists() ? parseClaudeBilling(snapshot.data()) : null }));
+        }),
+      );
     });
     return () => {
       stops.forEach((stop) => stop());
       stopAuth();
     };
   }, [fb]);
+
+  useEffect(() => {
+    if (!fb || !uid) return;
+    const received = workspace.grants.filter((grant) => grant.ownerId !== uid && grant.memberId === uid);
+    setWorkspace((current) => ({
+      ...current,
+      sharedProjects: current.sharedProjects.filter((project) => received.some((grant) => grant.kind === "project" && grant.targetId === project.id)),
+      sharedNotes: current.sharedNotes.filter((note) => received.some((grant) => grant.kind === "note" && grant.targetId === note.id)),
+    }));
+    const stops = received.map((grant) =>
+      onSnapshot(
+        doc(fb.db, "users", grant.ownerId, grant.kind === "project" ? "projects" : "notes", grant.targetId),
+        (snapshot) => {
+          if (grant.kind === "project") {
+            setWorkspace((current) => {
+              const rest = current.sharedProjects.filter((project) => project.id !== grant.targetId);
+              if (!snapshot.exists()) return { ...current, sharedProjects: rest };
+              const data = snapshot.data() as Project;
+              return {
+                ...current,
+                sharedProjects: [...rest, { ...data, id: grant.targetId, notes: data.notes ?? [], checks: data.checks ?? [], connections: data.connections ?? [], platforms: data.platforms ?? [] }],
+              };
+            });
+            return;
+          }
+          const parsed = snapshot.exists() ? parseDeskNote(grant.targetId, snapshot.data() as Record<string, unknown>) : null;
+          setWorkspace((current) => {
+            const rest = current.sharedNotes.filter((note) => note.id !== grant.targetId);
+            return parsed ? { ...current, sharedNotes: [...rest, parsed] } : { ...current, sharedNotes: rest };
+          });
+        },
+        () => {
+          setWorkspace((current) => ({
+            ...current,
+            sharedProjects: current.sharedProjects.filter((project) => project.id !== grant.targetId),
+            sharedNotes: current.sharedNotes.filter((note) => note.id !== grant.targetId),
+          }));
+        },
+      ),
+    );
+    return () => stops.forEach((stop) => stop());
+  }, [fb, uid, workspace.grants]);
 
   const put = useCallback(
     <K extends ListKey>(key: K, item: Workspace[K][number]) => {
@@ -290,11 +427,53 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const withProject = useCallback(
     (id: string, change: (project: Project) => Project) => {
-      const project = latest.current.projects.find((item) => item.id === id);
-      if (!project) return;
-      put("projects", { ...change(project), lastActivityAt: new Date().toISOString() });
+      const owned = latest.current.projects.find((item) => item.id === id);
+      const nextOf = (project: Project) => ({ ...change(project), lastActivityAt: new Date().toISOString() });
+      if (owned) {
+        const next = nextOf(owned);
+        if (fb && uid) {
+          const previous = new Map(owned.notes.map((note) => [note.id, note]));
+          for (const note of next.notes) {
+            const before = previous.get(note.id);
+            if (before && before.body === note.body && before.title === note.title && before.alarmAt === note.alarmAt && before.author === note.author) continue;
+            void setDoc(doc(fb.db, "users", uid, "notes", note.id), toDeskNote(note, next.id, next.name));
+          }
+          for (const noteId of previous.keys()) {
+            if (!next.notes.some((note) => note.id === noteId)) void deleteDoc(doc(fb.db, "users", uid, "notes", noteId));
+          }
+        }
+        put("projects", next);
+        return;
+      }
+      const grant = latest.current.grants.find((item) => item.kind === "project" && item.targetId === id && item.memberId === uid && item.role === "edit");
+      const shared = latest.current.sharedProjects.find((item) => item.id === id);
+      if (!grant || !shared || !fb || !uid) return;
+      const next = nextOf(shared);
+      setWorkspace((current) => ({
+        ...current,
+        sharedProjects: current.sharedProjects.map((item) => (item.id === id ? next : item)),
+      }));
+      void updateDoc(doc(fb.db, "users", grant.ownerId, "projects", id), {
+        nextStep: next.nextStep,
+        checks: next.checks,
+        notes: next.notes,
+        stage: next.stage,
+        tagline: next.tagline,
+        lastActivityAt: next.lastActivityAt,
+      });
+      const previous = new Map(shared.notes.map((note) => [note.id, note]));
+      for (const note of next.notes) {
+        const before = previous.get(note.id);
+        if (before && before.body === note.body && before.title === note.title && before.alarmAt === note.alarmAt) continue;
+        if (!before) continue;
+        void updateDoc(doc(fb.db, "users", grant.ownerId, "notes", note.id), {
+          body: note.body,
+          ...(note.title !== undefined ? { title: note.title } : {}),
+          ...(note.alarmAt !== undefined ? { alarmAt: note.alarmAt } : {}),
+        }).catch(() => undefined);
+      }
     },
-    [put],
+    [fb, uid, put],
   );
 
   const callable = useCallback(
@@ -320,6 +499,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ...workspace,
       ready,
       mode: uid ? "cloud" : "local",
+      uid,
       email,
       cloudAvailable: Boolean(fb),
       status,
@@ -357,6 +537,72 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const note: Note = { id: newId(), body, createdAt: new Date().toISOString(), author: "you" };
           return { ...project, notes: [note, ...project.notes] };
         }),
+      updateNote: (projectId, noteId, patch) => {
+        const clean: Partial<Pick<Note, "body" | "title" | "alarmAt">> = {};
+        if (patch.body !== undefined) {
+          const body = patch.body.trim();
+          if (!body) return;
+          clean.body = body;
+        }
+        if (patch.title !== undefined) clean.title = patch.title.trim().slice(0, 60);
+        if (patch.alarmAt !== undefined) clean.alarmAt = patch.alarmAt;
+        if (Object.keys(clean).length === 0) return;
+        const onProject = latest.current.projects.some((item) => item.id === projectId) || latest.current.sharedProjects.some((item) => item.id === projectId);
+        if (onProject) {
+          withProject(projectId, (project) => ({
+            ...project,
+            notes: project.notes.map((note) => (note.id === noteId ? { ...note, ...clean } : note)),
+          }));
+          return;
+        }
+        const grant = latest.current.grants.find((item) => item.kind === "note" && item.targetId === noteId && item.memberId === uid && item.role === "edit");
+        if (!grant || !fb) return;
+        setWorkspace((current) => ({
+          ...current,
+          sharedNotes: current.sharedNotes.map((note) => (note.id === noteId ? { ...note, ...clean } : note)),
+        }));
+        void updateDoc(doc(fb.db, "users", grant.ownerId, "notes", noteId), clean);
+      },
+      deleteNote: (projectId, noteId) => {
+        if (!latest.current.projects.some((item) => item.id === projectId)) return;
+        withProject(projectId, (project) => ({ ...project, notes: project.notes.filter((note) => note.id !== noteId) }));
+      },
+      createInvite: async (kind, targetId, role) => {
+        if (!fb || !uid) throw new Error("Paylaşmak için giriş yap.");
+        if (kind === "project") {
+          const project = latest.current.projects.find((item) => item.id === targetId);
+          if (!project) throw new Error("Bu projeyi yalnızca sahibi paylaşabilir.");
+          await setDoc(doc(fb.db, "users", uid, "projects", project.id), project);
+          return createCloudInvite(fb.db, { ownerId: uid, kind, targetId, role, label: project.name.trim() || "Proje" });
+        }
+        const project = latest.current.projects.find((item) => item.notes.some((note) => note.id === targetId));
+        const note = project?.notes.find((item) => item.id === targetId);
+        if (!project || !note) throw new Error("Bu notu yalnızca sahibi paylaşabilir.");
+        return createCloudInvite(fb.db, {
+          ownerId: uid,
+          kind: "note",
+          targetId: note.id,
+          role,
+          label: noteLabel(note),
+          note: toDeskNote(note, project.id, project.name),
+        });
+      },
+      redeemInvite: async (code) => {
+        if (!fb || !uid) throw new Error("Katılmak için giriş yap.");
+        return redeemCloudInvite(fb.db, uid, code);
+      },
+      setGrantRole: async (grantId, role) => {
+        if (!fb || !uid) throw new Error("Paylaşmak için giriş yap.");
+        const grant = latest.current.grants.find((item) => item.id === grantId && item.ownerId === uid);
+        if (!grant) throw new Error("Bunu yalnızca sahibi değiştirebilir.");
+        await setCloudGrantRole(fb.db, grant, role);
+      },
+      removeGrant: async (grantId) => {
+        if (!fb || !uid) throw new Error("Paylaşmak için giriş yap.");
+        const grant = latest.current.grants.find((item) => item.id === grantId && item.ownerId === uid);
+        if (!grant) throw new Error("Bunu yalnızca sahibi kaldırabilir.");
+        await removeCloudGrant(fb.db, grant);
+      },
       addConnection: (projectId, connection) =>
         withProject(projectId, (project) => ({
           ...project,

@@ -8,8 +8,12 @@
 //   captures/{captureId}      Capture     (basket: ideas, news, essays, tweets, screenshots)
 //   ideas/{ideaId}            Idea        (drafts minted from the basket)
 //   insights/latest           Insight     (last Claude analysis)
-//   desk/profile              { plan }    (free | pro; billing is not connected)
+//   notes/{noteId}            Note + projectId + projectName (mirror; one note can be shared alone)
+//   grants/{grantId}          Grant       (canonical copy on the owner; discovery copy on the member)
+//   desk/profile              { plan }    (free | pro; the idea cap. The client may write it. It does not open Claude.)
+//   billing/claude            ClaudeBilling (read-only. Subscription allowance or credits. Functions write it.)
 //   private/credentials       Credentials (write-only from the client, read by Functions)
+// Top-level invites/{code} is an expiring single-use code. It is not under the user, and it is not a public link.
 
 export type Stage = "idea" | "building" | "review" | "live" | "paused";
 
@@ -55,6 +59,10 @@ export type Note = {
   body: string;
   createdAt: string;
   author: "you" | "claude";
+  /** Short label for the list and the invite. The alarm never uses the body. */
+  title?: string;
+  /** ISO time of the single reminder. Null clears it. */
+  alarmAt?: string | null;
 };
 
 export type Project = {

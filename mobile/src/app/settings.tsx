@@ -2,6 +2,7 @@ import { router } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
 
+import { claudeSpend } from "@/domain/billing";
 import { useStore } from "@/data/store";
 import { Button, Field, Icon, Screen, Section, Surface, Txt } from "@/ui/kit";
 import { accent, space } from "@/ui/theme";
@@ -34,7 +35,7 @@ export default function Settings() {
             <Icon name="cloud-done" color={accent.mint} />
             <Txt variant="heading">Firebase ile senkron</Txt>
           </View>
-          <Txt tone="soft">Projeler, bildirimler ve metrikler tüm cihazlarında aynı. Claude analizi ve kaynak senkronu açık.</Txt>
+          <Txt tone="soft">Projeler, bildirimler ve metrikler tüm cihazlarında aynı. Kaynak senkronu açık. Claude, abonelik veya kredi ile açılır.</Txt>
           <Button label="Çıkış yap" tone="ghost" icon="log-out-outline" onPress={() => void run(store.signOut)} />
         </Surface>
       ) : store.cloudAvailable ? (
@@ -63,8 +64,13 @@ export default function Settings() {
         <Surface style={{ gap: space.sm }}>
           <Txt variant="heading">{store.plan === "pro" ? "Pro" : "Ücretsiz"}</Txt>
           <Txt tone="soft">
-            Sepet ve elle girilen istatistik her planda açık. Fikir üretmek de açık. Ücretsiz planda üç fikir saklanır; projeye yazmak aynı limite girer. Ödeme
-            bağlı değil, bu anahtar bir önizleme.
+            Sepet ve elle girilen istatistik her planda açık. Fikir üretmek de açık. Ücretsiz planda üç fikir saklanır; projeye yazmak aynı limite girer. Bu
+            anahtar yalnızca fikir sınırını değiştirir. Claude açmaz.
+          </Txt>
+          <Txt tone="soft">
+            {store.claudeBilling && claudeSpend(store.claudeBilling, new Date())
+              ? `Claude açık. Dönem hakkı ${store.claudeBilling.allowanceRemaining}, kredi ${store.claudeBilling.credits}. Abonelik ayda 40 analiz içerir. Hak bitince her analiz bir kredi harcar.`
+              : "Claude kapalı. Açılması için abonelik ya da kredi gerekir. Ödeme uygulamanın içinde henüz alınmıyor. Hak sunucuda tanımlanır."}
           </Txt>
           <Button
             label={store.plan === "pro" ? "Ücretsiz planı önizle" : "Pro masaya dön"}
@@ -76,6 +82,8 @@ export default function Settings() {
       </Section>
 
       <Section title="Diğer" delay={120}>
+        <Button label="Notlar" tone="ghost" icon="document-text-outline" onPress={() => router.push("/notes")} />
+        <Button label="Davet koduyla katıl" tone="ghost" icon="key-outline" onPress={() => router.push("/join")} />
         <Button label="Sepet" tone="ghost" icon="basket-outline" onPress={() => router.push("/basket")} />
         <Button label="Fikirler" tone="ghost" icon="bulb-outline" onPress={() => router.push("/ideas")} />
         <Button label="Kaynaklar ve API anahtarları" tone="ghost" icon="link-outline" onPress={() => router.push("/sources")} />

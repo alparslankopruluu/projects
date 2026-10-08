@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.alparslankopruluu.projects"
+      "bundleIdentifier": "com.alparslankopruluu.projects",
+      "googleServicesFile": "./GoogleService-Info.plist"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +20,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.alparslankopruluu.projects"
+      "package": "com.alparslankopruluu.projects",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "output": "static",

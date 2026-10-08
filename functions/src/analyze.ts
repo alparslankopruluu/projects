@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { col, db } from "./admin.js";
 import type { Commit, Insight, Metric, Note, Project, Signal, StoreEvent } from "./model.js";
+import { overlayProjectNotes, type StoredNote } from "./notes.js";
 import { upsertSignals } from "./signals.js";
 import { loadProjects } from "./sync.js";
 import type { SignalDraft } from "./types.js";
@@ -53,6 +54,8 @@ Görevin: bugün neye odaklanılması gerektiğini, hangi risklerin büyüdüğ�
 4. Büyüme işleri (mağaza sayfası, fiyatlandırma, pazarlama, metrik iyileştirme).
 
 Kurallar:
+- Proje notlarını oku ve kullan. Sahibinin yazdığı niyet, karar ve sıradaki oturum, metrik olmasa da bugünün odağını belirleyebilir.
+- Notta anahtar, token veya parola gibi duran bir dizeyi çıktıya kopyalama. Onu yok say.
 - Asla sayı uydurma. Yalnızca verideki metrikleri, tarihleri ve sayıları kullan. Bir metrik yoksa ya da kaynak bağlı değilse bunu açıkça "bağlı değil" / "veri yok" diye söyle; tahmin yürütme.
 - projectId alanlarında yalnızca verideki proje id'lerini kullan; genel bir konuysa null ver.
 - Zaten okunmamış olarak duran bir sinyali yeni sinyal olarak tekrar etme.
@@ -69,13 +72,15 @@ type Workspace = {
 };
 
 async function loadWorkspace(uid: string, now: Date): Promise<{ projects: Project[]; workspace: Workspace }> {
-  const [projects, signalsSnap, metricsSnap, eventsSnap, commitsSnap] = await Promise.all([
+  const [loaded, notesSnap, signalsSnap, metricsSnap, eventsSnap, commitsSnap] = await Promise.all([
     loadProjects(uid),
+    col(uid, "notes").get(),
     col(uid, "signals").where("read", "==", false).limit(100).get(),
     col(uid, "metrics").orderBy("recordedAt", "desc").limit(300).get(),
     col(uid, "events").orderBy("at", "desc").limit(40).get(),
     col(uid, "commits").orderBy("at", "desc").limit(30).get(),
   ]);
+  const projects = overlayProjectNotes(loaded, notesSnap.docs.map((item) => item.data() as StoredNote));
 
   // Latest value per project + metric key.
   const latest = new Map<string, Metric>();
@@ -98,7 +103,7 @@ async function loadWorkspace(uid: string, now: Date): Promise<{ projects: Projec
       connections: (p.connections ?? []).map((c) => ({ kind: c.kind, mode: c.mode, lastSyncAt: c.lastSyncAt })),
       openChecks: (p.checks ?? []).filter((c) => !c.done).map((c) => ({ label: c.label, owner: c.owner })),
       doneChecks: (p.checks ?? []).filter((c) => c.done).length,
-      notes: (p.notes ?? []).slice(-10).map((n) => ({ author: n.author, createdAt: n.createdAt, body: n.body })),
+      notes: [...(p.notes ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 10).map((n) => ({ author: n.author, createdAt: n.createdAt, body: n.body })),
       startedAt: p.startedAt,
       lastActivityAt: p.lastActivityAt,
     })),
@@ -208,7 +213,9 @@ export async function runAnalysis(uid: string, apiKey: string, now = new Date())
   for (const n of out.notes.slice(0, 5)) {
     if (!ids.has(n.projectId) || !n.body.trim()) continue;
     const note: Note = { id: randomUUID(), body: n.body.trim(), createdAt: now.toISOString(), author: "claude" };
+    const projectName = projects.find((item) => item.id === n.projectId)?.name ?? "";
     batch.update(col(uid, "projects").doc(n.projectId), { notes: FieldValue.arrayUnion(note) });
+    batch.set(col(uid, "notes").doc(note.id), { ...note, projectId: n.projectId, projectName });
   }
   await batch.commit();
   await upsertSignals(uid, drafts, now);

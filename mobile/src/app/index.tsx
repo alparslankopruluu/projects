@@ -5,6 +5,7 @@ import Animated, { FadeIn, FadeInDown, ZoomIn } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useStore } from "@/data/store";
+import { claudeSpend } from "@/domain/billing";
 import { staleCaptures } from "@/domain/basket";
 import { greeting, inboxCounts, isUnfinished, portfolioMetric, progressOf, stageCounts, todaysFocus } from "@/domain/derive";
 import { STAGE_LABEL } from "@/domain/model";
@@ -157,11 +158,19 @@ export default function Home() {
                 </Txt>
                 <Txt tone={p.dark ? "#5E5B66" : "#B4B0BC"}>{focus.why}</Txt>
                 <Button
-                  label={store.mode === "cloud" ? "Claude ile yeniden analiz et" : "Claude analizi için giriş yap"}
+                  label={
+                    store.mode !== "cloud"
+                      ? "Claude analizi için giriş yap"
+                      : claudeSpend(store.claudeBilling, new Date())
+                        ? "Claude ile yeniden analiz et"
+                        : "Claude abonelik veya kredi ister"
+                  }
                   icon="sparkles-outline"
                   tone="onInverse"
                   busy={status.busy === "analyze"}
-                  onPress={() => (store.mode === "cloud" ? void store.analyze() : router.push("/settings"))}
+                  onPress={() =>
+                    store.mode === "cloud" && claudeSpend(store.claudeBilling, new Date()) ? void store.analyze() : router.push("/settings")
+                  }
                   style={{ marginTop: space.sm }}
                 />
                 {status.error ? (

@@ -5,10 +5,65 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == userId;
     }
 
-    // Mobile app data: users/{uid}/{collection}/{doc} (projects, signals, metrics, events, commits, insights).
-    // Cloud Functions use the Admin SDK and bypass these rules.
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function grantPath(ownerId, id) {
+      return /databases/$(database)/documents/users/$(ownerId)/grants/$(id);
+    }
+
+    function projectGrant(ownerId, projectId) {
+      return get(grantPath(ownerId, "project_" + projectId + "_" + request.auth.uid)).data;
+    }
+
+    function hasProjectGrant(ownerId, projectId) {
+      return signedIn()
+        && exists(grantPath(ownerId, "project_" + projectId + "_" + request.auth.uid))
+        && projectGrant(ownerId, projectId).kind == "project"
+        && projectGrant(ownerId, projectId).targetId == projectId
+        && projectGrant(ownerId, projectId).memberId == request.auth.uid
+        && (projectGrant(ownerId, projectId).role == "view" || projectGrant(ownerId, projectId).role == "edit");
+    }
+
+    function canEditProject(ownerId, projectId) {
+      return hasProjectGrant(ownerId, projectId) && projectGrant(ownerId, projectId).role == "edit";
+    }
+
+    function noteGrant(ownerId, noteId) {
+      return get(grantPath(ownerId, "note_" + noteId + "_" + request.auth.uid)).data;
+    }
+
+    function hasNoteGrant(ownerId, noteId) {
+      return signedIn()
+        && exists(grantPath(ownerId, "note_" + noteId + "_" + request.auth.uid))
+        && noteGrant(ownerId, noteId).kind == "note"
+        && noteGrant(ownerId, noteId).targetId == noteId
+        && noteGrant(ownerId, noteId).memberId == request.auth.uid
+        && (noteGrant(ownerId, noteId).role == "view" || noteGrant(ownerId, noteId).role == "edit");
+    }
+
+    function canEditNote(ownerId, noteId) {
+      return hasNoteGrant(ownerId, noteId) && noteGrant(ownerId, noteId).role == "edit";
+    }
+
+    // Mobile app data: users/{uid}/{collection}/{doc}.
+    // Grants, notes and projects also have the specific matches below. A match allows if any rule allows.
+    // The owner can still write their own tree, except private and billing. A member cannot.
     match /users/{userId}/{collection}/{docId} {
-      allow read, write: if isOwner(userId) && collection != "private";
+      allow read, write: if isOwner(userId) && collection != "private" && collection != "billing";
+    }
+
+    // Release gate. Anyone may read version floors and store links. Nobody may write them from the client.
+    match /config/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Subscription allowance and credits. Only Functions write this. The owner may read it.
+    match /users/{userId}/billing/{docId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
     }
 
     // users/{uid}/private/{doc} holds source credentials: the owner may create/update them,
@@ -16,6 +71,96 @@ service cloud.firestore {
     match /users/{userId}/private/{docId} {
       allow create, update: if isOwner(userId);
       allow read, delete: if false;
+    }
+
+    // Single-use invite. Any signed-in person may read one code. Listing is the owner's.
+    // The code is not a public link: there is no list without auth, and the body is not on this document.
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow list: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if signedIn()
+        && code == request.resource.data.code
+        && request.resource.data.code is string
+        && request.resource.data.code.size() >= 16
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.claimedBy == null
+        && request.resource.data.revoked == false
+        && (request.resource.data.role == "view" || request.resource.data.role == "edit")
+        && (request.resource.data.kind == "project" || request.resource.data.kind == "note")
+        && request.resource.data.targetId is string
+        && request.resource.data.targetId.size() > 0
+        && request.resource.data.label is string
+        && request.resource.data.label.size() > 0
+        && request.resource.data.label.size() <= 60
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt > request.time
+        && request.resource.data.expiresAt < request.time + duration.value(7, 'd')
+        && (
+          (request.resource.data.kind == "project"
+            && exists(/databases/$(database)/documents/users/$(request.auth.uid)/projects/$(request.resource.data.targetId)))
+          || (request.resource.data.kind == "note"
+            && exists(/databases/$(database)/documents/users/$(request.auth.uid)/notes/$(request.resource.data.targetId)))
+        );
+      allow update: if signedIn() && (
+        (resource.data.claimedBy == null
+          && resource.data.revoked == false
+          && resource.data.expiresAt > request.time
+          && request.resource.data.claimedBy == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["claimedBy"]))
+        || (resource.data.ownerId == request.auth.uid
+          && request.resource.data.revoked == true
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["revoked"]))
+      );
+      allow delete: if false;
+    }
+
+    // Canonical grant is users/{owner}/grants/{kind_target_member}. The member also keeps a discovery copy.
+    // Create requires a claimed, unrevoked, unexpired invite. Role is copied from the invite.
+    // Only the owner of the grant may change the role or delete either copy.
+    match /users/{userId}/grants/{grantId} {
+      allow read: if signedIn() && (
+        isOwner(userId) || resource.data.memberId == request.auth.uid || resource.data.ownerId == request.auth.uid
+      );
+      allow create: if signedIn()
+        && request.resource.data.memberId == request.auth.uid
+        && request.resource.data.code is string
+        && exists(/databases/$(database)/documents/invites/$(request.resource.data.code))
+        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.claimedBy == request.auth.uid
+        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.revoked == false
+        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.expiresAt > request.time
+        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.ownerId == request.resource.data.ownerId
+        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.targetId == request.resource.data.targetId
+        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.kind == request.resource.data.kind
+        && get(/databases/$(database)/documents/invites/$(request.resource.data.code)).data.role == request.resource.data.role
+        && grantId == request.resource.data.kind + "_" + request.resource.data.targetId + "_" + request.auth.uid
+        && (userId == request.auth.uid || userId == request.resource.data.ownerId);
+      allow update: if signedIn()
+        && resource.data.ownerId == request.auth.uid
+        && (request.resource.data.role == "view" || request.resource.data.role == "edit")
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role"]);
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // A member reads a shared project. An editor may change the work, not the members, the sources, or the project itself.
+    match /users/{userId}/projects/{projectId} {
+      allow read: if hasProjectGrant(userId, projectId);
+      allow update: if canEditProject(userId, projectId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["nextStep", "checks", "notes", "stage", "tagline", "lastActivityAt"]);
+    }
+
+    // A note mirror. Readers: the owner (broad rule), a note grant, or a grant on the note's project.
+    // Editors may change the text and the alarm. They cannot move the note or rewrite who wrote it.
+    match /users/{userId}/notes/{noteId} {
+      allow read: if hasNoteGrant(userId, noteId)
+        || (resource.data.projectId is string && hasProjectGrant(userId, resource.data.projectId));
+      allow update: if (
+          canEditNote(userId, noteId)
+          || (resource.data.projectId is string && canEditProject(userId, resource.data.projectId))
+        )
+        && request.resource.data.projectId == resource.data.projectId
+        && request.resource.data.author == resource.data.author
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.id == resource.data.id;
     }
 
     function isMember(workspaceId) {

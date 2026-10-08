@@ -7,6 +7,6 @@ export const db: Firestore = getFirestore();
 
 // Firestore layout helpers (see model.ts header).
 export const userDoc = (uid: string) => db.collection("users").doc(uid);
-export const col = (uid: string, name: "projects" | "signals" | "metrics" | "events" | "commits" | "insights" | "private") =>
+export const col = (uid: string, name: "projects" | "signals" | "metrics" | "events" | "commits" | "insights" | "notes" | "private") =>
   userDoc(uid).collection(name);
 export const credentialsDoc = (uid: string) => col(uid, "private").doc("credentials");

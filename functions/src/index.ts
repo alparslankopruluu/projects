@@ -5,6 +5,8 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { col } from "./admin.js";
 import { runAnalysis } from "./analyze.js";
+import type { Insight } from "./model.js";
+import { refundClaudeCall, reserveClaudeCall } from "./billingStore.js";
 import { sendExpoPush } from "./push.js";
 import { loadCredentials, syncUser, usersWithCredentials } from "./sync.js";
 import { errorMessage } from "./util.js";
@@ -22,7 +24,16 @@ function requireUid(auth: { uid: string } | undefined): string {
 
 export const analyze = onCall({ secrets: [anthropicKey], timeoutSeconds: 300, memory: "512MiB" }, async (req) => {
   const uid = requireUid(req.auth);
-  return runAnalysis(uid, anthropicKey.value());
+  const spent = await reserveClaudeCall(uid, new Date());
+  if (!spent) throw new HttpsError("permission-denied", "Claude abonelik veya kredi ister.");
+  try {
+    return await runAnalysis(uid, anthropicKey.value());
+  } catch (err) {
+    await refundClaudeCall(uid, spent).catch((refundErr) => {
+      logger.error("Claude refund failed", { uid, error: errorMessage(refundErr) });
+    });
+    throw err;
+  }
 });
 
 export const syncSources = onCall({ timeoutSeconds: 300 }, async (req) => {
@@ -51,8 +62,19 @@ export const dailyDigest = onSchedule(
   async () => {
     const uids = await usersWithCredentials();
     for (const uid of uids) {
+      const spent = await reserveClaudeCall(uid, new Date());
+      if (!spent) continue;
+      let insight: Insight;
       try {
-        const insight = await runAnalysis(uid, anthropicKey.value());
+        insight = await runAnalysis(uid, anthropicKey.value());
+      } catch (err) {
+        await refundClaudeCall(uid, spent).catch((refundErr) => {
+          logger.error("Claude refund failed", { uid, error: errorMessage(refundErr) });
+        });
+        logger.error("dailyDigest user failed", { uid, error: errorMessage(err) });
+        continue;
+      }
+      try {
         const creds = await loadCredentials(uid);
         const tokens = creds.expoPushTokens ?? [];
         if (tokens.length === 0) continue;

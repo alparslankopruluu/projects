@@ -27,7 +27,10 @@ export default function ProjectDetail() {
   const p = usePalette();
   const insets = useSafeAreaInsets();
   const store = useStore();
-  const project = store.projects.find((item) => item.id === id);
+  const owned = store.projects.find((item) => item.id === id);
+  const project = owned ?? store.sharedProjects.find((item) => item.id === id);
+  const access = owned ? "owner" : (store.grants.find((item) => item.kind === "project" && item.targetId === id && item.memberId === store.uid)?.role ?? null);
+  const canEdit = access === "owner" || access === "edit";
   const [note, setNote] = useState("");
   const [task, setTask] = useState("");
   const [metricKey, setMetricKey] = useState<MetricKey>("downloads");
@@ -43,10 +46,11 @@ export default function ProjectDetail() {
     return [...events, ...commits].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 12);
   }, [store.events, store.commits, id]);
 
-  if (!project) {
+  if (!project || !access) {
+    const waiting = store.grants.some((item) => item.kind === "project" && item.targetId === id && item.memberId === store.uid);
     return (
       <View style={{ flex: 1, backgroundColor: p.bg, padding: space.xl, paddingTop: insets.top + space.xl }}>
-        <Empty icon="help-circle-outline" title="Proje bulunamadı" body="Silinmiş ya da başka bir hesapta olabilir." />
+        <Empty icon="help-circle-outline" title={waiting ? "Proje açılıyor" : "Proje bulunamadı"} body={waiting ? "Davet doğrulanıyor." : "Silinmiş ya da başka bir hesapta olabilir."} />
       </View>
     );
   }
@@ -64,7 +68,10 @@ export default function ProjectDetail() {
           <View style={{ width: "100%", maxWidth: MAX_WIDTH, paddingHorizontal: space.lg, gap: space.lg }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
               <RoundButton icon="chevron-back" label="Geri" onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))} />
-              <RoundButton icon="film-outline" label="Aşama videosu" onPress={() => router.push(`/video/${project.id}`)} />
+              <View style={{ flexDirection: "row", gap: space.sm }}>
+                {access === "owner" ? <RoundButton icon="share-outline" label="Paylaş" onPress={() => router.push(`/share?kind=project&id=${project.id}`)} /> : null}
+                <RoundButton icon="film-outline" label="Aşama videosu" onPress={() => router.push(`/video/${project.id}`)} />
+              </View>
             </View>
             <Animated.View entering={FadeInDown.duration(450)} style={{ flexDirection: "row", alignItems: "center", gap: space.lg }}>
               <Ring ratio={progress.ratio} size={84} stroke={9} color={hueSolid(project.hue)} track="rgba(255,255,255,0.55)">
@@ -79,6 +86,8 @@ export default function ProjectDetail() {
                 <Txt tone={ink} style={{ opacity: 0.75 }}>
                   {project.tagline}
                 </Txt>
+                {access === "view" ? <Txt variant="caption" tone={ink}>Görüntüleme</Txt> : null}
+                {access === "edit" ? <Txt variant="caption" tone={ink}>Düzenleme</Txt> : null}
               </View>
             </Animated.View>
 
@@ -109,11 +118,13 @@ export default function ProjectDetail() {
                 <Pill label={STAGE_LABEL[project.stage]} color={STAGE_COLOR[project.stage]} />
               </View>
               <Txt variant="title">{project.nextStep}</Txt>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
-                {STAGES.map((stage) => (
-                  <Chip key={stage} label={STAGE_LABEL[stage]} color={STAGE_COLOR[stage]} selected={project.stage === stage} onPress={() => store.updateProject(project.id, { stage })} />
-                ))}
-              </View>
+              {canEdit ? (
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
+                  {STAGES.map((stage) => (
+                    <Chip key={stage} label={STAGE_LABEL[stage]} color={STAGE_COLOR[stage]} selected={project.stage === stage} onPress={() => store.updateProject(project.id, { stage })} />
+                  ))}
+                </View>
+              ) : null}
               <Txt variant="caption" tone="faint">
                 Son hareket {daysSince(project.lastActivityAt) === 0 ? "bugün" : `${daysSince(project.lastActivityAt)} gün önce`} · {project.platforms.map((item) => `${item.os} ${item.version}`).join(" · ") || "platform yok"}
               </Txt>
@@ -126,7 +137,7 @@ export default function ProjectDetail() {
                 {rejection.version} reddedildi
               </Txt>
               <Txt tone="soft">{rejection.detail || "Gerekçe yazılmamış. Kaynaklar ekranından ekleyebilirsin."}</Txt>
-              <Button label="Düzeltme işlerini ekle" icon="alert-circle-outline" onPress={() => store.addRejectionWork(project.id)} />
+              {canEdit ? <Button label="Düzeltme işlerini ekle" icon="alert-circle-outline" onPress={() => store.addRejectionWork(project.id)} /> : null}
             </Surface>
           ) : null}
 
@@ -147,6 +158,7 @@ export default function ProjectDetail() {
                   {index > 0 ? <Divider /> : null}
                   <Pressable
                     onPress={() => {
+                      if (!canEdit) return;
                       tap();
                       store.toggleCheck(project.id, item.id);
                     }}
@@ -163,11 +175,15 @@ export default function ProjectDetail() {
                   </Pressable>
                 </View>
               ))}
-              <Divider />
-              <View style={{ flexDirection: "row", gap: space.sm, padding: space.md }}>
-                <Field value={task} onChangeText={setTask} placeholder="Yeni iş ekle" style={{ flex: 1 }} onSubmitEditing={() => submitTask()} returnKeyType="done" />
-                <RoundButton icon="add" label="İş ekle" onPress={() => submitTask()} />
-              </View>
+              {canEdit ? (
+                <>
+                  <Divider />
+                  <View style={{ flexDirection: "row", gap: space.sm, padding: space.md }}>
+                    <Field value={task} onChangeText={setTask} placeholder="Yeni iş ekle" style={{ flex: 1 }} onSubmitEditing={() => submitTask()} returnKeyType="done" />
+                    <RoundButton icon="add" label="İş ekle" onPress={() => submitTask()} />
+                  </View>
+                </>
+              ) : null}
             </Surface>
           </Section>
 
@@ -191,7 +207,7 @@ export default function ProjectDetail() {
                 );
               })}
             </View>
-            <Surface style={{ gap: space.md }}>
+            {access === "owner" ? <Surface style={{ gap: space.md }}>
               <Txt variant="label">Elle gir</Txt>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
                 {METRICS.map((key) => (
@@ -202,10 +218,10 @@ export default function ProjectDetail() {
                 <Field value={metricValue} onChangeText={setMetricValue} keyboardType="decimal-pad" placeholder="Değer" style={{ flex: 1 }} />
                 <Button label="Kaydet" onPress={submitMetric} disabled={!metricValue.trim()} />
               </View>
-            </Surface>
+            </Surface> : null}
           </Section>
 
-          <Section title="Kaynaklar" action="Bağla" onAction={() => router.push(`/sources?projectId=${project.id}`)} delay={280}>
+          <Section title="Kaynaklar" action={access === "owner" ? "Bağla" : undefined} onAction={access === "owner" ? () => router.push(`/sources?projectId=${project.id}`) : undefined} delay={280}>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: space.sm }}>
               {project.connections.length === 0 ? (
                 <Txt tone="soft">Henüz kaynak yok.</Txt>
@@ -248,24 +264,30 @@ export default function ProjectDetail() {
             )}
           </Section>
 
-          <Section title="Notlar" delay={360}>
-            <Surface style={{ gap: space.md }}>
-              <Field value={note} onChangeText={setNote} placeholder="Bir sonraki oturum ne bilmeli?" multiline style={{ minHeight: 80, textAlignVertical: "top" }} />
-              <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
-                <Button label="Not ekle" icon="create-outline" onPress={submitNote} disabled={!note.trim()} />
-                <Button label="Sepete at" icon="basket-outline" tone="ghost" onPress={sendToBasket} disabled={!note.trim()} />
-              </View>
-            </Surface>
-            {project.notes.map((item) => (
-              <Surface key={item.id} style={{ gap: 6 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Icon name={item.author === "claude" ? "sparkles" : "person-outline"} size={14} color={item.author === "claude" ? accent.violet : p.inkSoft} />
-                  <Txt variant="caption" tone="faint">
-                    {item.author === "claude" ? "Claude" : "Sen"} · {item.createdAt.slice(0, 10)}
-                  </Txt>
+          <Section title="Notlar" action="Tümü" onAction={() => router.push("/notes")} delay={360}>
+            {canEdit ? (
+              <Surface style={{ gap: space.md }}>
+                <Field value={note} onChangeText={setNote} placeholder="Bir sonraki oturum ne bilmeli?" multiline style={{ minHeight: 80, textAlignVertical: "top" }} />
+                <View style={{ flexDirection: "row", gap: space.sm, flexWrap: "wrap" }}>
+                  <Button label="Not ekle" icon="create-outline" onPress={submitNote} disabled={!note.trim()} />
+                  {access === "owner" ? <Button label="Sepete at" icon="basket-outline" tone="ghost" onPress={sendToBasket} disabled={!note.trim()} /> : null}
                 </View>
-                <Txt>{item.body}</Txt>
               </Surface>
+            ) : null}
+            {project.notes.length === 0 ? <Empty icon="document-text-outline" title="Not yok" body="Bir sonraki oturumun bilmesi gerekeni buraya yaz." /> : null}
+            {project.notes.map((item) => (
+              <Pressable key={item.id} onPress={() => router.push(`/notes/${item.id}?projectId=${project.id}`)}>
+                <Surface style={{ gap: 6 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Icon name={item.author === "claude" ? "sparkles" : "person-outline"} size={14} color={item.author === "claude" ? accent.violet : p.inkSoft} />
+                    <Txt variant="caption" tone="faint">
+                      {item.title?.trim() || (item.author === "claude" ? "Claude" : "Sen")} · {item.createdAt.slice(0, 10)}
+                    </Txt>
+                    {item.alarmAt ? <Icon name="alarm-outline" size={14} color={p.inkSoft} /> : null}
+                  </View>
+                  <Txt>{item.body}</Txt>
+                </Surface>
+              </Pressable>
             ))}
           </Section>
         </View>

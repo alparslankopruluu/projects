@@ -8,10 +8,10 @@ Veri modeli `src/model.ts` içinde; `mobile/src/domain/model.ts` ile birebir ayn
 
 | Ad | Tür | Ne yapar |
 | --- | --- | --- |
-| `analyze` | callable (giriş şart) | Projeleri, okunmamış sinyalleri, son metrikleri, mağaza/deploy olaylarını, son 30 commit'i ve notları Claude'a gönderir. `users/{uid}/insights/latest` belgesini yazar, yeni sinyalleri (`source: "claude"`) ekler, faydalı notları proje notlarına `author: "claude"` ile ekler. |
+| `analyze` | callable (giriş ve Claude hakkı şart) | Abonelik hakkı ya da kredi varsa bir çağrı düşer, sonra projeleri, sinyalleri, metrikleri, olayları, son 30 commit'i ve notları Claude'a gönderir. Çağrı başarısız olursa hakkı iade eder. |
 | `syncSources` | callable (giriş şart) | Kullanıcının bütün API bağlantılarını hemen senkronlar. |
 | `scheduledSync` | 6 saatte bir | `private/credentials` belgesi olan her kullanıcı için aynı senkronu çalıştırır. |
-| `dailyDigest` | her gün 09:00 (Europe/Istanbul) | Her kullanıcı için analizi çalıştırır, başlığı ve kritik sinyal sayısını Expo push ile gönderir. |
+| `dailyDigest` | her gün 09:00 (Europe/Istanbul) | Claude hakkı olan hesaplarda analizi çalıştırır ve Expo push ile gönderir. Hakkı olmayan hesabı atlar. |
 
 Senkron sonunda `src/rules.ts` içindeki kural çalışır: aşaması `idea` veya `building` olup 14 gündür hareketsiz projeler için uyarı sinyali oluşur. Sinyaller `dedupeKey` ile tekilleştirilir (belge id = anahtarın hash'i); tekrar eden senkronlar kopya üretmez ve okundu işaretini bozmaz.
 
