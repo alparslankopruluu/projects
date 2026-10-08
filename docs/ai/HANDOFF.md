@@ -17,4 +17,4 @@ Files: mobile/src/app/notes, share.tsx, join.tsx, apps/[id].tsx, settings.tsx, _
 
 Next exact action: Deploy firestore rules so invites work. Then set the Claude secret, deploy functions, write `billing/claude`, and write `config/release` without raising min above 1.0.0.
 
-Last relevant commit: the notes, alarm, and invite commit on main.
+Last relevant commit: 556f572
